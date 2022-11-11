@@ -69,7 +69,7 @@ namespace psd {
     uint16_t resourceID;
     std::string name;
     std::vector<uint8_t> data;
-    std::unique_ptr<OSTypeDescriptor> descriptor;
+    OSTypeDescriptor *descriptor;
 
     static const char* resIDString(uint16_t resID);
     static bool resIDHasDescriptor(uint16_t resID);
@@ -261,10 +261,6 @@ namespace psd {
     }
   };
 
-  struct OSTypeClassMetaType {
-    std::string name;
-  };
-
   struct OSTypeUnitFloat : public OSType {
     static constexpr OSTypeKey kType = OSTypeKey::UnitFloat;
     enum class Unit {
@@ -298,7 +294,7 @@ namespace psd {
   struct OSTypeClass : public OSType {
     static constexpr OSTypeKey kType = OSTypeKey::ClassType;
     std::wstring className;
-    OSTypeClassMetaType meta;
+    std::string meta;
 
     OSTypeKey type() const override { return kType; }
   };
@@ -314,9 +310,9 @@ namespace psd {
   struct OSTypeEnumeratedRef : public OSType {
     static constexpr OSTypeKey kType = OSTypeKey::RefEnum;
     std::wstring refClassID;
-    OSTypeClassMetaType classID;
-    OSTypeClassMetaType typeID;
-    OSTypeClassMetaType enumValue;
+    std::string classID;
+    std::string typeID;
+    std::string enumValue;
 
     OSTypeKey type() const override { return kType; }
   };
@@ -324,7 +320,7 @@ namespace psd {
   struct OSTypeOffset : public OSType {
     static constexpr OSTypeKey kType = OSTypeKey::RefOffset;
     std::wstring offsetName;
-    OSTypeClassMetaType classID;
+    std::string classID;
     uint32_t value = 0;
 
     OSTypeKey type() const override { return kType; }
@@ -378,52 +374,41 @@ namespace psd {
   struct OSTypeProperty : public OSType {
     static constexpr OSTypeKey kType = OSTypeKey::RefProperty;
     std::wstring propName;
-    OSTypeClassMetaType classID;
-    OSTypeClassMetaType keyID;
+    std::string classID;
+    std::string keyID;
 
     OSTypeKey type() const override { return kType; }
   };
 
-  class DescriptorMap {
-  public:
-    using Map = std::map<std::string, std::unique_ptr<OSType>>;
-
-    template<typename T>
-    const T* getValue(const std::string& key) const {
-      const auto ptr = find(key);
-      if (!ptr || ptr->type() != T::kType)
-        return nullptr;
-      return static_cast<const T*>(ptr);
-    }
-
-    const OSType* find(const std::string& key) const {
-      const auto iter = m_items.find(key);
-      if (iter == m_items.cend())
-        return nullptr;
-      return iter->second.get();
-    }
-
-    Map::size_type size() const { return m_items.size(); }
-    Map& items() { return m_items; }
-    const Map& items() const { return m_items; }
-
-  private:
-    Map m_items;
+  // Encapsulates the "4 bytes (length), followed either by string or (if length is zero) some 4-byte ID". Used for classID, keyID, typeID, and enums.
+  struct StringOrInt {
+    std::string str; // If this string is zero-length, the num member has the 4-byte ID.
+    uint32_t num;
   };
 
-  struct OSTypeDescriptor : public OSType {
-    static constexpr OSTypeKey kType = OSTypeKey::Descriptor;
-    std::wstring descriptorName;
-    OSTypeClassMetaType classId;
-    DescriptorMap descriptor;
+  struct DescriptorItemOSType {
 
-    OSTypeKey type() const override { return kType; }
+  };
+
+  struct ReferenceItemOSType {
+
+  };
+
+  struct DescriptorItem {
+    StringOrInt key;
+    DescriptorItemOSType *data;
+  };
+
+  struct Descriptor {
+    std::wstring name;
+    StringOrInt classId;
+    std::vector<DescriptorItem *> items;
   };
 
   struct OSTypeEnum : public OSType {
     static constexpr OSTypeKey kType = OSTypeKey::Enumerated;
-    OSTypeClassMetaType typeID;
-    OSTypeClassMetaType enumValue;
+    std::string typeID;
+    std::string enumValue;
 
     OSTypeKey type() const override { return kType; }
   };
@@ -633,13 +618,13 @@ namespace psd {
     std::unique_ptr<OSTypeDescriptor> readAnimatedDataSection();
     std::unique_ptr<OSType> parseOsTypeVariable();
     std::unique_ptr<OSTypeReference> parseReferenceType();
-    std::unique_ptr<OSTypeDescriptor> parseDescriptor();
+    bool readDescriptor(Descriptor& descriptor);
     std::unique_ptr<OSTypeList> parseListType();
     std::unique_ptr<OSTypeClass> parseClassType();
     std::unique_ptr<OSTypeEnum> parseEnumeratedType();
     std::unique_ptr<OSTypeAlias> parseAliasType();
-    OSTypeClassMetaType parseDescrVariable();
-    std::wstring getUnicodeString();
+    std::string readStringId();
+    std::wstring readUnicodeString();
 
     uint8_t read8() { return m_file->read8(); }
     uint16_t read16();
@@ -649,8 +634,8 @@ namespace psd {
     uint64_t read32or64Length();
     std::string readPascalString(const int alignment);
 
-    DecoderDelegate* m_delegate;
     FileInterface* m_file;
+    DecoderDelegate* m_delegate;
     FileHeader m_header;
   };
 

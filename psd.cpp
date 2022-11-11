@@ -28,17 +28,11 @@ bool decode_psd(FileInterface* file,
 {
   Decoder decoder(file, delegate);
 
-  try {
-    decoder.readFileHeader();
-    decoder.readColorModeData();
-    decoder.readImageResources();
-    decoder.readLayersAndMask();
+  return decoder.readFileHeader() &&
+    decoder.readColorModeData() &&
+    decoder.readImageResources() &&
+    decoder.readLayersAndMask() &&
     decoder.readImageData();
-  }
-  catch (const std::exception&) {
-    return false;
-  }
-  return true;
 }
 
 } // namespace psd

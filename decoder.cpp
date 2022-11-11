@@ -15,8 +15,8 @@ namespace psd {
 
 Decoder::Decoder(FileInterface* file,
                  DecoderDelegate* delegate)
-  : m_delegate(delegate)
-  , m_file(file)
+  : m_file(file),
+    m_delegate(delegate)
 {
 }
 
@@ -41,36 +41,34 @@ bool Decoder::readFileHeader()
         width, height, depth, colorMode);
 
   if (magic != PSD_FILE_MAGIC_NUMBER)
-    throw std::runtime_error(
-      "The magic number in the header do not match");
+    return false;
 
   if (depth != 1 && depth != 8 && depth != 16 && depth != 32)
-    throw std::runtime_error("Unsupported image depth");
+    return false;
+
 
   if (colorMode != uint16_t(ColorMode::Bitmap) &&
-      colorMode != uint16_t(ColorMode::Grayscale) &&
-      colorMode != uint16_t(ColorMode::Indexed) &&
-      colorMode != uint16_t(ColorMode::RGB) &&
-      colorMode != uint16_t(ColorMode::CMYK) &&
-      colorMode != uint16_t(ColorMode::Multichannel) &&
-      colorMode != uint16_t(ColorMode::Duotone) &&
-      colorMode != uint16_t(ColorMode::Lab))
-    throw std::runtime_error("Invalid color mode found in the header");
+    colorMode != uint16_t(ColorMode::Grayscale) &&
+    colorMode != uint16_t(ColorMode::Indexed) &&
+    colorMode != uint16_t(ColorMode::RGB) &&
+    colorMode != uint16_t(ColorMode::CMYK) &&
+    colorMode != uint16_t(ColorMode::Multichannel) &&
+    colorMode != uint16_t(ColorMode::Duotone) &&
+    colorMode != uint16_t(ColorMode::Lab))
+    return false;
 
   // Check valid supported size depending on file version
   switch (Version(version)) {
     case Version::Psd:
       if (width > 30000 || height > 30000)
-        throw std::runtime_error(
-          "Unexpected width/height for a PSD file");
+        return false;
       break;
     case Version::Psb:
       if (width > 300000 || height > 300000)
-        throw std::runtime_error(
-          "Unexpected width/height for a PSB file");
+        return false;
       break;
     default:
-      throw std::runtime_error("Invalid version number");
+      return false;
   }
 
   m_header.version = Version(version);
@@ -93,20 +91,16 @@ bool Decoder::readColorModeData()
   TRACE("Color Mode Data length=%d\n", data.length);
   // Only indexed and duotone have color mode, all other modes
   // have their length set to 0
+  if (m_header.colorMode != ColorMode::Indexed &&
+    m_header.colorMode != ColorMode::Duotone)
+    return data.length == 0 && m_file->ok();
+  else if (data.length == 0)
+    return false;
 
-  if (data.length == 0) {
-    if (m_header.colorMode == ColorMode::Indexed
-      || m_header.colorMode == ColorMode::Duotone)
-      throw std::runtime_error(
-        "The color mode cannot be indexed/duotone and have size zero,"
-        "this must be a corrupt file");
-    else
-      return m_file->ok();
-  }
 
   if (m_header.colorMode == ColorMode::Indexed) {
     if (data.length != 768)
-      throw std::runtime_error("Unexpected palette length for indexed image");
+      return false;
 
     data.colors.resize(256);
     for (int i=0; i<256; ++i) data.colors[i].r = read8();
@@ -144,9 +138,8 @@ bool Decoder::readImageResources()
 
     const uint16_t resID = read16();
 #ifdef _DEBUG
-    const char* resourceName = ImageResource::resIDString(resID);
-    (void)resourceName;
-    TRACE("%s\n", resourceName);
+    const char* resIDstr = ImageResource::resIDString(resID);
+    TRACE("%s\n", resIDstr);
 #endif // _DEBUG
 
     const std::string name = readPascalString(2);
@@ -159,8 +152,10 @@ bool Decoder::readImageResources()
     if (resLength) {
       if (ImageResource::resIDHasDescriptor(resID)) {
         const uint32_t descVersion = read32();
-        if (descVersion == 16)
-          res.descriptor = parseDescriptor();
+        if (descVersion == 16) {
+          res.descriptor = &OSTypeDescriptor();
+          readDescriptor(*res.descriptor);
+        }
       }
       else if (resID == 4003) { // Animation frames information
         // Details of how it is parsed is in readAnimatedDataSection()
@@ -605,7 +600,7 @@ uint64_t Decoder::readAdditionalLayerInfo(LayerRecord& layerRecord)
       (version == 4 || version == 5)) {
       auto desc = parseDescriptor();
       if (desc) {
-        TRACE("Descriptor name: %ls\n", desc->descriptorName.c_str());
+        TRACE("Descriptor name: %ls\n", desc->name.c_str());
         TRACE("Descriptor size: %zu\n", desc->descriptor.size());
       }
     }
@@ -624,7 +619,7 @@ uint64_t Decoder::readAdditionalLayerInfo(LayerRecord& layerRecord)
     if (descVersion == 16) {
       auto desc = parseDescriptor();
       if (desc) {
-        TRACE("Descriptor name: %ls\n", desc->descriptorName.c_str());
+        TRACE("Descriptor name: %ls\n", desc->name.c_str());
         TRACE("Descriptor size: %zu\n", desc->descriptor.size());
       }
     }
